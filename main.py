@@ -14,7 +14,7 @@ DEFAULT_IMAGE = Path(__file__).parent / "assets" / "welcome-kkz.jpg"
     PLUGIN_NAME,
     "Rio",
     "QQ 群入群欢迎插件：检测到新成员入群时，自动发送可在控制台配置的图片和文字。",
-    "1.2.0",
+    "1.2.1",
     "https://github.com/YourName/astrbot_plugin_welcome_qqgroup",
 )
 class WelcomePlugin(Star):

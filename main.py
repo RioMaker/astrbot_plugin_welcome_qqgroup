@@ -7,6 +7,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 PLUGIN_NAME = "astrbot_plugin_welcome_qqgroup"
+DEFAULT_IMAGE = Path(__file__).parent / "assets" / "welcome-kkz.jpg"
 
 
 @register(
@@ -154,6 +155,16 @@ class WelcomePlugin(Star):
         comp = self._build_image(image)
         if comp is not None:
             comps.append(comp)
+
+        # 未配置任何图片时，回退使用插件自带的默认欢迎图片
+        if not comps and self.config.get("use_default_image", True):
+            if DEFAULT_IMAGE.exists():
+                try:
+                    comps.append(Comp.Image.fromFileSystem(str(DEFAULT_IMAGE)))
+                except Exception as e:
+                    logger.error(f"[welcome] 构建默认欢迎图片失败: {e}")
+            else:
+                logger.warning(f"[welcome] 默认欢迎图片缺失: {DEFAULT_IMAGE}")
 
         return comps
 

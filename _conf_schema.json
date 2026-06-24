@@ -18,6 +18,12 @@
     "hint": "图片的网络地址（以 http:// 或 https:// 开头）或机器人所在服务器上的本地文件绝对路径。留空则不使用。如已通过上方上传图片，可不填。",
     "default": ""
   },
+  "use_default_image": {
+    "type": "bool",
+    "description": "未配置图片时使用自带默认图片",
+    "hint": "当“上传图片”和“图片链接/路径”都为空时，是否发送插件自带的默认欢迎图片。关闭后将不发送图片（除非自行配置）。",
+    "default": true
+  },
   "at_new_member": {
     "type": "bool",
     "description": "是否 @ 新成员",

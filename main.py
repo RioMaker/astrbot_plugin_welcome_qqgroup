@@ -11,7 +11,7 @@ PLUGIN_NAME = "astrbot_plugin_welcome_qqgroup"
 
 @register(
     PLUGIN_NAME,
-    "YourName",
+    "Rio",
     "QQ 群入群欢迎插件：检测到新成员入群时，自动发送可在控制台配置的图片和文字。",
     "1.2.0",
     "https://github.com/YourName/astrbot_plugin_welcome_qqgroup",

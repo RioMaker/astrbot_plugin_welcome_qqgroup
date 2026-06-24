@@ -2,8 +2,8 @@ name: astrbot_plugin_welcome_qqgroup
 display_name: QQ 群入群欢迎
 desc: 检测到新成员入群时，自动发送可在控制台配置的图片和文字欢迎消息。
 short_desc: QQ 群新成员入群自动发送图文欢迎。
-version: v1.0.0
-author: YourName
+version: v1.2.0
+author: Rio
 repo: https://github.com/YourName/astrbot_plugin_welcome_qqgroup
 astrbot_version: ">=4.13.0"
 support_platforms:

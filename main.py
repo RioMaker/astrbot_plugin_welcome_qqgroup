@@ -1,24 +1,201 @@
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
+import asyncio
+
+import astrbot.api.message_components as Comp
+from astrbot.api import AstrBotConfig, logger
+from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
-from astrbot.api import logger
 
-@register("helloworld", "YourName", "一个简单的 Hello World 插件", "1.0.0")
-class MyPlugin(Star):
-    def __init__(self, context: Context):
+
+@register(
+    "astrbot_plugin_welcome_qqgroup",
+    "YourName",
+    "QQ 群入群欢迎插件：检测到新成员入群时，自动发送可在控制台配置的图片和文字。",
+    "1.0.0",
+    "https://github.com/YourName/astrbot_plugin_welcome_qqgroup",
+)
+class WelcomePlugin(Star):
+    def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
+        self.config = config
 
-    async def initialize(self):
-        """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    async def on_group_increase(self, event: AstrMessageEvent):
+        """监听 aiocqhttp(OneBot v11) 事件，识别群成员增加(group_increase)通知并发送欢迎。
 
-    # 注册指令的装饰器。指令名为 helloworld。注册成功后，发送 `/helloworld` 就会触发这个指令，并回复 `你好, {user_name}!`
-    @filter.command("helloworld")
-    async def helloworld(self, event: AstrMessageEvent):
-        """这是一个 hello world 指令""" # 这是 handler 的描述，将会被解析方便用户了解插件内容。建议填写。
-        user_name = event.get_sender_name()
-        message_str = event.message_str # 用户发的纯文本消息字符串
-        message_chain = event.get_messages() # 用户所发的消息的消息链 # from astrbot.api.message_components import *
-        logger.info(message_chain)
-        yield event.plain_result(f"Hello, {user_name}, 你发了 {message_str}!") # 发送一条纯文本消息
+        aiocqhttp 适配器会把 notice 类事件转换成普通的 GROUP_MESSAGE 事件交给事件管线，
+        原始 OneBot 事件保留在 event.message_obj.raw_message 中。这里通过框架原生的事件
+        监听器接入，避免直接 monkey-patch 底层 client 带来的热重载泄漏与强耦合问题。
+        """
+        raw = event.message_obj.raw_message
+        if not self._is_group_increase(raw):
+            return
+
+        group_id = str(self._raw_get(raw, "group_id") or "")
+        user_id = str(self._raw_get(raw, "user_id") or "")
+        self_id = str(self._raw_get(raw, "self_id") or event.get_self_id() or "")
+
+        # 跳过机器人自己被拉进群的情况
+        if user_id and self_id and user_id == self_id:
+            return
+
+        # 群白名单过滤
+        enabled_groups = self._enabled_groups()
+        if enabled_groups and group_id not in enabled_groups:
+            return
+
+        delay = self._send_delay()
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+        chain = await self._build_welcome_chain(event, group_id, user_id)
+        if not chain:
+            logger.debug("[welcome] 欢迎语和图片均为空，跳过发送。")
+            return
+
+        logger.info(f"[welcome] 群 {group_id} 新成员 {user_id} 入群，发送欢迎消息。")
+        yield event.chain_result(chain)
+        # 这是一条合成的 notice 事件，处理完毕后停止传播，避免触发后续阶段。
+        event.stop_event()
+
+    @filter.command("welcometest")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def welcome_test(self, event: AstrMessageEvent):
+        """管理员指令：在当前群预览入群欢迎消息（把自己当作新成员）。"""
+        group_id = event.get_group_id() or ""
+        user_id = event.get_sender_id() or ""
+        if not group_id:
+            yield event.plain_result("该指令需要在群聊中使用。")
+            return
+        chain = await self._build_welcome_chain(event, group_id, user_id)
+        if not chain:
+            yield event.plain_result(
+                "当前欢迎语和图片均未配置，请先在插件配置中设置后再预览。"
+            )
+            return
+        yield event.chain_result(chain)
+
+    async def _build_welcome_chain(
+        self,
+        event: AstrMessageEvent,
+        group_id: str,
+        user_id: str,
+    ) -> list:
+        """根据配置构建欢迎消息链。"""
+        text = (self.config.get("welcome_text", "") or "").strip()
+        image = (self.config.get("image", "") or "").strip()
+
+        text_comp = None
+        if text:
+            formatted = await self._format_text(event, text, group_id, user_id)
+            if formatted:
+                text_comp = Comp.Plain(formatted)
+
+        image_comp = self._build_image(image)
+
+        if text_comp is None and image_comp is None:
+            return []
+
+        chain: list = []
+        if self.config.get("at_new_member", True) and user_id:
+            chain.append(Comp.At(qq=user_id))
+            chain.append(Comp.Plain(" "))
+
+        if self.config.get("send_image_first", False):
+            if image_comp is not None:
+                chain.append(image_comp)
+            if text_comp is not None:
+                chain.append(text_comp)
+        else:
+            if text_comp is not None:
+                chain.append(text_comp)
+            if image_comp is not None:
+                chain.append(image_comp)
+
+        return chain
+
+    async def _format_text(
+        self,
+        event: AstrMessageEvent,
+        text: str,
+        group_id: str,
+        user_id: str,
+    ) -> str:
+        """替换欢迎语中的占位符。"""
+        nickname = ""
+        if "{nickname}" in text:
+            nickname = await self._get_nickname(event, group_id, user_id)
+
+        replacements = {
+            "{nickname}": nickname or user_id,
+            "{user_id}": user_id,
+            "{group_id}": group_id,
+        }
+        for key, value in replacements.items():
+            text = text.replace(key, str(value))
+        return text
+
+    def _build_image(self, image: str):
+        """把配置中的图片地址转成 Image 组件，支持 URL / 本地路径 / base64。"""
+        if not image:
+            return None
+        try:
+            if image.startswith(("http://", "https://")):
+                return Comp.Image.fromURL(image)
+            if image.startswith("base64://"):
+                return Comp.Image(file=image)
+            return Comp.Image.fromFileSystem(image)
+        except Exception as e:
+            logger.error(f"[welcome] 构建欢迎图片失败（image={image!r}）: {e}")
+            return None
+
+    async def _get_nickname(
+        self,
+        event: AstrMessageEvent,
+        group_id: str,
+        user_id: str,
+    ) -> str:
+        """通过 OneBot API 获取新成员昵称，失败时返回空字符串由调用方回退。"""
+        client = getattr(event, "bot", None)
+        if client is None or not group_id.isdigit() or not user_id.isdigit():
+            return ""
+        try:
+            info = await client.call_action(
+                "get_group_member_info",
+                group_id=int(group_id),
+                user_id=int(user_id),
+                no_cache=True,
+            )
+            if info:
+                return info.get("card") or info.get("nickname") or ""
+        except Exception as e:
+            logger.debug(f"[welcome] 获取新成员昵称失败，将回退使用 QQ 号: {e}")
+        return ""
+
+    def _enabled_groups(self) -> list[str]:
+        groups = self.config.get("enabled_groups", []) or []
+        return [str(g).strip() for g in groups if str(g).strip()]
+
+    def _send_delay(self) -> float:
+        try:
+            return max(0.0, float(self.config.get("send_delay", 0) or 0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _is_group_increase(self, raw) -> bool:
+        """判断原始事件是否为 OneBot v11 的群成员增加通知。"""
+        if raw is None:
+            return False
+        return (
+            self._raw_get(raw, "post_type") == "notice"
+            and self._raw_get(raw, "notice_type") == "group_increase"
+        )
+
+    @staticmethod
+    def _raw_get(raw, key):
+        """兼容 dict 与对象两种形式地读取原始事件字段。"""
+        if isinstance(raw, dict):
+            return raw.get(key)
+        return getattr(raw, key, None)
 
     async def terminate(self):
-        """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
+        """插件卸载/停用时调用。本插件使用框架原生事件监听器，无需手动注销。"""

@@ -1,13 +1,16 @@
 import asyncio
+from pathlib import Path
 
 import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.api.star import Context, Star, register
+from astrbot.api.star import Context, Star, StarTools, register
+
+PLUGIN_NAME = "astrbot_plugin_welcome_qqgroup"
 
 
 @register(
-    "astrbot_plugin_welcome_qqgroup",
+    PLUGIN_NAME,
     "YourName",
     "QQ 群入群欢迎插件：检测到新成员入群时，自动发送可在控制台配置的图片和文字。",
     "1.0.0",
@@ -82,7 +85,6 @@ class WelcomePlugin(Star):
     ) -> list:
         """根据配置构建欢迎消息链。"""
         text = (self.config.get("welcome_text", "") or "").strip()
-        image = (self.config.get("image", "") or "").strip()
 
         text_comp = None
         if text:
@@ -90,9 +92,9 @@ class WelcomePlugin(Star):
             if formatted:
                 text_comp = Comp.Plain(formatted)
 
-        image_comp = self._build_image(image)
+        image_comps = self._collect_images()
 
-        if text_comp is None and image_comp is None:
+        if text_comp is None and not image_comps:
             return []
 
         chain: list = []
@@ -101,15 +103,13 @@ class WelcomePlugin(Star):
             chain.append(Comp.Plain(" "))
 
         if self.config.get("send_image_first", False):
-            if image_comp is not None:
-                chain.append(image_comp)
+            chain.extend(image_comps)
             if text_comp is not None:
                 chain.append(text_comp)
         else:
             if text_comp is not None:
                 chain.append(text_comp)
-            if image_comp is not None:
-                chain.append(image_comp)
+            chain.extend(image_comps)
 
         return chain
 
@@ -133,6 +133,48 @@ class WelcomePlugin(Star):
         for key, value in replacements.items():
             text = text.replace(key, str(value))
         return text
+
+    def _collect_images(self) -> list:
+        """收集所有欢迎图片组件：先是控制台上传的图片，再是外部链接/路径。"""
+        comps = []
+
+        uploaded = self.config.get("image_file", []) or []
+        if isinstance(uploaded, str):
+            uploaded = [uploaded]
+        for rel in uploaded:
+            path = self._resolve_uploaded(str(rel))
+            if not path:
+                continue
+            try:
+                comps.append(Comp.Image.fromFileSystem(path))
+            except Exception as e:
+                logger.error(f"[welcome] 构建上传图片失败（path={path!r}）: {e}")
+
+        image = (self.config.get("image", "") or "").strip()
+        comp = self._build_image(image)
+        if comp is not None:
+            comps.append(comp)
+
+        return comps
+
+    def _resolve_uploaded(self, rel_path: str):
+        """把控制台上传图片的相对路径解析为可读取的绝对路径。"""
+        rel_path = (rel_path or "").strip()
+        if not rel_path:
+            return None
+        p = Path(rel_path)
+        if p.is_absolute():
+            return str(p) if p.exists() else None
+        try:
+            base = StarTools.get_data_dir(PLUGIN_NAME)
+        except Exception as e:
+            logger.error(f"[welcome] 获取插件数据目录失败: {e}")
+            return None
+        full = (Path(base) / rel_path).resolve()
+        if full.exists():
+            return str(full)
+        logger.warning(f"[welcome] 上传的欢迎图片不存在，已跳过: {full}")
+        return None
 
     def _build_image(self, image: str):
         """把配置中的图片地址转成 Image 组件，支持 URL / 本地路径 / base64。"""

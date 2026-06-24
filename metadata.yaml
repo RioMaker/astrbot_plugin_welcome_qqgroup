@@ -5,5 +5,6 @@ short_desc: QQ 群新成员入群自动发送图文欢迎。
 version: v1.0.0
 author: YourName
 repo: https://github.com/YourName/astrbot_plugin_welcome_qqgroup
+astrbot_version: ">=4.13.0"
 support_platforms:
   - aiocqhttp

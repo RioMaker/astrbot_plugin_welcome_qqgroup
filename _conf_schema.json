@@ -5,10 +5,17 @@
     "hint": "新成员入群时发送的文字。支持占位符：{nickname} 新成员昵称、{user_id} 新成员 QQ 号、{group_id} 群号。留空则不发送文字。",
     "default": "🎉 欢迎 {nickname} 加入本群！\n请先阅读群公告，遵守群规，祝你在这里玩得开心~"
   },
+  "image_file": {
+    "type": "file",
+    "description": "欢迎图片（上传）",
+    "hint": "直接上传图片文件，支持多张。需要 AstrBot >= v4.13.0。若同时填写了下方的“欢迎图片（链接/路径）”，上传的图片会先发送。",
+    "default": [],
+    "file_types": ["jpg", "jpeg", "png", "gif", "webp", "bmp"]
+  },
   "image": {
     "type": "string",
-    "description": "欢迎图片（可选）",
-    "hint": "图片的网络地址（以 http:// 或 https:// 开头）或机器人所在服务器上的本地文件绝对路径。留空则不发送图片。",
+    "description": "欢迎图片（链接/路径，可选）",
+    "hint": "图片的网络地址（以 http:// 或 https:// 开头）或机器人所在服务器上的本地文件绝对路径。留空则不使用。如已通过上方上传图片，可不填。",
     "default": ""
   },
   "at_new_member": {
